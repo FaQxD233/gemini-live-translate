@@ -116,4 +116,8 @@ gemini-live-translate/
 
 ## License
 
-仅供学习与个人使用。Gemini API 的使用受 Google 服务条款约束。
+仅供学习与个人使用。Gemini API 的使用受 Google 服务条款约束。本项目中所有 Gemini 商标归属 Google。
+
+## 友链
+
+感谢 [LinuxDo](https://linux.do) 社区佬友们的交流与分享，以及各公益站提供的免费apikey让我一个小白也能写点东西
