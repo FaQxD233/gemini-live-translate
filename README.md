@@ -112,8 +112,6 @@ gemini-live-translate/
 
 **点 Settings 没反应**：检查 API key 是否已填，看 stderr 输出是否有异常。
 
-**`PaErrorCode -9998 invalid number of channels`**：WASAPI loopback 不支持 `channels=1`，必须匹配设备原生通道数（通常 2）。本仓库已修复，使用 PyAudioWPatch 自动读取设备原生通道数。
-
 **托盘图标不见**：Windows 11 默认折叠托盘，点任务栏右下角 `^` 展开。
 
 ## License

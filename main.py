@@ -77,6 +77,7 @@ class LiveBuddyApp(QObject):
         self.hud.toggle_requested.connect(self.toggle)
         self.hud.settings_requested.connect(self.open_settings)
         self.hud.clear_requested.connect(self.hud.clear)
+        self.hud.exit_requested.connect(self.stop)
 
         # wire client signals to HUD
         self.client.inputTranscript.connect(self.hud.set_input)
@@ -244,7 +245,12 @@ def main() -> int:
     act_show = QAction("Show HUD", menu)
     act_show.triggered.connect(controller.hud.show)
     act_quit = QAction("Quit", menu)
+    act_quit.triggered.connect(controller.stop)
     act_quit.triggered.connect(app.quit)
+    # HUD Exit button: stop session (if running) then quit the app.
+    # The stop() connection is already wired in LiveBuddyApp.__init__;
+    # here we add the app-level quit on top.
+    controller.hud.exit_requested.connect(app.quit)
     menu.addAction(act_toggle)
     menu.addAction(act_settings)
     menu.addAction(act_show)

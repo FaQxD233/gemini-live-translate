@@ -40,6 +40,7 @@ class HUDWindow(QWidget):
     toggle_requested = Signal()
     settings_requested = Signal()
     clear_requested = Signal()
+    exit_requested = Signal()
 
     def __init__(self, settings) -> None:
         super().__init__()
@@ -153,9 +154,16 @@ class HUDWindow(QWidget):
         self.settings_btn.setFixedWidth(36)
         self.settings_btn.setToolTip("Settings")
         self.settings_btn.clicked.connect(self.settings_requested.emit)
+        self.exit_btn = QPushButton("Exit")
+        self.exit_btn.setObjectName("iconBtn")
+        self.exit_btn.setCursor(Qt.PointingHandCursor)
+        self.exit_btn.setFixedWidth(48)
+        self.exit_btn.setToolTip("Quit application")
+        self.exit_btn.clicked.connect(self.exit_requested.emit)
         ctrl.addWidget(self.toggle_btn)
         ctrl.addWidget(self.clear_btn)
         ctrl.addStretch(1)
+        ctrl.addWidget(self.exit_btn)
         ctrl.addWidget(self.settings_btn)
         card_layout.addWidget(self.control_bar)
         # Buttons hidden until hover. control_bar itself stays visible + at
@@ -163,7 +171,7 @@ class HUDWindow(QWidget):
         # (We can't use QGraphicsOpacityEffect here because the parent
         # widget already has a QGraphicsDropShadowEffect and Qt refuses to
         # nest graphics effects reliably.)
-        for btn in (self.toggle_btn, self.clear_btn, self.settings_btn):
+        for btn in (self.toggle_btn, self.clear_btn, self.settings_btn, self.exit_btn):
             btn.setVisible(False)
 
         # Note: size grips live in the outer 3x3 grid (one per corner),
@@ -501,12 +509,12 @@ class HUDWindow(QWidget):
     def enterEvent(self, event) -> None:
         # Reveal the control buttons on hover. control_bar itself stays at
         # its fixed 40px slot, so the captions above never reflow.
-        for btn in (self.toggle_btn, self.clear_btn, self.settings_btn):
+        for btn in (self.toggle_btn, self.clear_btn, self.settings_btn, self.exit_btn):
             btn.setVisible(True)
         super().enterEvent(event)
 
     def leaveEvent(self, event) -> None:
-        for btn in (self.toggle_btn, self.clear_btn, self.settings_btn):
+        for btn in (self.toggle_btn, self.clear_btn, self.settings_btn, self.exit_btn):
             btn.setVisible(False)
         super().leaveEvent(event)
 

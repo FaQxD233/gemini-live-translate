@@ -196,7 +196,7 @@ class SettingsDialog(QDialog):
         # regional mirror. Empty falls back to the Google official endpoint.
         self.api_base_edit = QLineEdit(settings.api_base)
         self.api_base_edit.setPlaceholderText(DEFAULT_API_BASE)
-        conn_form.addRow("API Base URL", self._wrap(self.api_base_edit))
+        conn_form.addRow("API Base URL", self.api_base_edit)
 
         self.lang_combo = QComboBox()
         for code, name in LANGUAGES:
