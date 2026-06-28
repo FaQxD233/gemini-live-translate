@@ -1,0 +1,5 @@
+PySide6>=6.6
+PyAudioWPatch>=0.2.12
+numpy>=1.26
+scipy>=1.11
+websockets>=12

@@ -1,0 +1,24 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.venv/
+venv/
+env/
+.python-version
+
+# PyInstaller build artifacts
+build/
+dist/
+*.spec
+
+# Logs / temp output from diagnostic scripts
+*.out
+*.log
+
+# IDE / OS
+.vscode/
+.idea/
+Thumbs.db
+.DS_Store
