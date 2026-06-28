@@ -2,8 +2,6 @@
 
 实时翻译浮动字幕条，基于 Google Gemini Live API。捕获系统声音或麦克风，实时转写并翻译成目标语言，以浮动 HUD 形式叠加在屏幕上。
 
-灵感来自 macOS 上的 [LiveBuddy](https://github.com/your/original-repo) 项目，本仓库是它的 Windows 移植版，使用 Python + PySide6 重写。
-
 ## 功能
 
 - **音源**：系统音频（WASAPI loopback）或麦克风
