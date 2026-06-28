@@ -16,7 +16,7 @@
 
 - Windows 10 / 11（64 位）
 - 如从源码运行：Python 3.11+
-- 如运行打包版：无需 Python，双击 exe 即可
+- 如运行打包版：无需 Python，下载release里的.exe直接运行即可
 
 ## 从源码运行
 
