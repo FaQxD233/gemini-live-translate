@@ -1,5 +1,5 @@
-PySide6>=6.6
-PyAudioWPatch>=0.2.12
-numpy>=1.26
-scipy>=1.11
-websockets>=12
+PySide6>=6.6,<7
+PyAudioWPatch>=0.2.12,<1
+numpy>=1.26,<3
+scipy>=1.11,<2
+websockets>=12,<14

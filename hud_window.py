@@ -1,8 +1,10 @@
 """Floating caption HUD overlay (port of CaptionPanelController + CaptionView)."""
 from __future__ import annotations
 
-from PySide6.QtCore import QEvent, Qt, QPoint, Signal
-from PySide6.QtGui import QColor, QFont, QFontMetrics, QMouseEvent, QTextCursor, QTextOption
+import base64
+
+from PySide6.QtCore import QEvent, QByteArray, Qt, QPoint, Signal
+from PySide6.QtGui import QColor, QFont, QFontMetrics, QGuiApplication, QMouseEvent, QTextCursor, QTextOption
 from PySide6.QtWidgets import (
     QFrame,
     QGraphicsDropShadowEffect,
@@ -391,9 +393,10 @@ class HUDWindow(QWidget):
         in_visible_h = in_h if show_original else 0
         header_h = 22
         card_pad_v = 14 * 2  # card_layout contentsMargins top+bottom
-        # When original is hidden, divider+input_edit are removed from layout,
-        # so we lose 2 items (and 2 spacings between them).
-        spacings = 5 if show_original else 3
+        # When original is hidden, divider+input_edit are removed from layout.
+        # Items: header, output_edit, [divider, input_edit], control_bar
+        # → 4 spacings when showing original, 2 when hidden.
+        spacings = 4 if show_original else 2
         spacing_v = 6 * spacings
         return (
             card_pad_v
@@ -434,12 +437,14 @@ class HUDWindow(QWidget):
     def set_status(self, status: str) -> None:
         self._status = status or ""
         s = self._status.lower()
-        if any(k in s for k in ("connected", "ready", "live")):
+        if not s or "stopped" in s or s == "stop":
+            self._status_kind = "idle"
+        elif any(k in s for k in ("error", "fail", "disconnected", "closed", "timeout", "timed out")):
+            self._status_kind = "error"
+        elif any(k in s for k in ("connected", "ready", "live")):
             self._status_kind = "connected"
         elif any(k in s for k in ("connect", "starting", "loading", "init")):
             self._status_kind = "connecting"
-        elif any(k in s for k in ("error", "fail", "disconnected", "stop")):
-            self._status_kind = "error"
         else:
             self._status_kind = "idle"
         self._refresh()
@@ -453,6 +458,24 @@ class HUDWindow(QWidget):
 
     def set_running_state(self, running: bool) -> None:
         self.toggle_btn.setText("Pause" if running else "Start")
+
+    def restore_geometry(self, geometry_b64: str) -> None:
+        """Restore window position/size from a base64-encoded QByteArray."""
+        if not geometry_b64:
+            return
+        try:
+            raw = base64.b64decode(geometry_b64)
+            self.restoreGeometry(QByteArray(raw))
+        except Exception:
+            pass
+
+    def save_geometry(self) -> str:
+        """Return the current window geometry as a base64-encoded string."""
+        try:
+            ba = self.saveGeometry()
+            return base64.b64encode(bytes(ba)).decode("ascii")
+        except Exception:
+            return ""
 
     # ---------- internals ----------
 
@@ -507,6 +530,12 @@ class HUDWindow(QWidget):
     # ---------- Qt event overrides ----------
 
     def enterEvent(self, event) -> None:
+        # Clear stale drag state if the user released the mouse outside
+        # the window (no release event would have been delivered).
+        if self._drag_offset is not None and not (
+            QGuiApplication.mouseButtons() & Qt.LeftButton
+        ):
+            self._drag_offset = None
         # Reveal the control buttons on hover. control_bar itself stays at
         # its fixed 40px slot, so the captions above never reflow.
         for btn in (self.toggle_btn, self.clear_btn, self.settings_btn, self.exit_btn):

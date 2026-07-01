@@ -2,9 +2,11 @@
 from __future__ import annotations
 
 import threading
+from math import gcd
 from typing import Callable, Optional
 
 import numpy as np
+from scipy.signal import resample_poly
 
 
 class PCM16Downsampler:
@@ -26,14 +28,13 @@ class PCM16Downsampler:
         if src_rate == self.target_rate:
             resampled = mono
         else:
-            ratio = self.target_rate / src_rate
-            out_count = max(1, int(len(mono) * ratio))
-            xs = np.arange(out_count, dtype=np.float64)
-            src_pos = xs / ratio
-            lower = np.clip(src_pos.astype(np.int64), 0, len(mono) - 1)
-            upper = np.clip(lower + 1, 0, len(mono) - 1)
-            frac = (src_pos - lower).astype(np.float32)
-            resampled = mono[lower] + (mono[upper] - mono[lower]) * frac
+            # Use scipy's polyphase resampler for proper anti-aliased
+            # downsampling (linear interpolation introduces aliasing noise
+            # that degrades speech recognition accuracy).
+            g = gcd(src_rate, self.target_rate)
+            up = self.target_rate // g
+            down = src_rate // g
+            resampled = resample_poly(mono, up, down)
 
         clipped = np.clip(resampled, -1.0, 1.0)
         int16 = (clipped * 32767.0).astype("<i2")  # little-endian int16

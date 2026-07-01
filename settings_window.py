@@ -19,7 +19,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from settings import DEFAULT_API_BASE, LANGUAGES, AppSettings
+from settings import DEFAULT_API_BASE, DEFAULT_GEMINI_MODEL, LANGUAGES, AppSettings
 
 ACCENT = "#7C5CFF"
 ACCENT_HOVER = "#9D7FFF"
@@ -251,6 +251,9 @@ class SettingsDialog(QDialog):
         # ---------- Advanced card ----------
         outer.addWidget(self._section_title("ADVANCED"))
         adv_card, adv_form = self._make_card()
+        self.model_edit = QLineEdit(settings.gemini_model)
+        self.model_edit.setPlaceholderText(DEFAULT_GEMINI_MODEL)
+        adv_form.addRow("Model ID", self.model_edit)
         self.prompt_edit = QTextEdit()
         self.prompt_edit.setPlainText(settings.system_prompt)
         self.prompt_edit.setMaximumHeight(90)
@@ -326,7 +329,7 @@ class SettingsDialog(QDialog):
         settings.api_key = self.api_key_edit.text().strip()
         # Empty api_base → use official Google endpoint (handled by client).
         settings.api_base = self.api_base_edit.text().strip() or DEFAULT_API_BASE
-        settings.target_language = self.lang_combo.currentData() or "es"
+        settings.target_language = self.lang_combo.currentData() or "zh"
         settings.audio_source = self.source_combo.currentData() or "system"
         settings.font_size = self.font_slider.value()
         settings.bg_opacity = self.opacity_slider.value() / 100.0
@@ -334,3 +337,4 @@ class SettingsDialog(QDialog):
         settings.echo_target_language = self.echo_check.isChecked()
         settings.system_prompt = self.prompt_edit.toPlainText().strip()
         settings.show_original = self.show_original_check.isChecked()
+        settings.gemini_model = self.model_edit.text().strip() or DEFAULT_GEMINI_MODEL
