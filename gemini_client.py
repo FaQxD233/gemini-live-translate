@@ -151,14 +151,9 @@ class GeminiClient(QObject):
             ws = self._ws
         if loop and ws:
             try:
-                asyncio.run_coroutine_threadsafe(self._shutdown(ws), loop).result(timeout=2.0)
+                asyncio.run_coroutine_threadsafe(self._shutdown(ws), loop)
             except Exception:
                 pass
-        if thread and thread is not threading.current_thread():
-            thread.join(timeout=5.0)
-            with self._state_lock:
-                if self._thread is thread and not thread.is_alive():
-                    self._thread = None
 
     def send_audio(self, pcm16_bytes: bytes, session_id: Optional[int] = None) -> None:
         """Thread-safe: called from audio capture callback thread."""
