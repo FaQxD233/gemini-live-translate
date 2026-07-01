@@ -1,6 +1,7 @@
 """Gemini Live Translate entry point: PySide6 application + signal orchestration."""
 from __future__ import annotations
 
+import ctypes
 import sys
 from typing import Optional
 
@@ -15,51 +16,83 @@ from PySide6.QtWidgets import (
 )
 
 from audio import AudioCapture, AudioPlayer, terminate_pyaudio
-from gemini_client import GeminiClient
+from gemini_client import (
+    GeminiClient,
+    KIND_CONNECTED,
+    KIND_CONNECTING,
+    KIND_ERROR,
+    KIND_IDLE,
+)
 from hud_window import HUDWindow
+from i18n import tr
 from settings import AppSettings
 from settings_window import DIALOG_QSS, SettingsDialog
+from theme import ACCENT
 
 # Global QSS supplement: extends DIALOG_QSS with menu + QMessageBox styling so
 # the system tray context menu and warning/error dialogs share the same theme.
-GLOBAL_QSS = DIALOG_QSS + """
-QMenu {
+GLOBAL_QSS = DIALOG_QSS + f"""
+QMenu {{
     background: white;
     border: 1px solid #D2D6DF;
     border-radius: 8px;
     padding: 6px;
-}
-QMenu::item {
+}}
+QMenu::item {{
     background: transparent;
     color: #1F2330;
     padding: 6px 18px;
     border-radius: 5px;
     margin: 1px 4px;
-}
-QMenu::item:selected {
-    background: #7C5CFF;
+}}
+QMenu::item:selected {{
+    background: {ACCENT};
     color: white;
-}
-QMenu::separator {
+}}
+QMenu::separator {{
     height: 1px;
     background: #E3E6EC;
     margin: 4px 8px;
-}
-QToolTip {
+}}
+QToolTip {{
     background: #1F2330;
     color: white;
     border: 1px solid #1F2330;
     padding: 4px 8px;
     border-radius: 4px;
-}
-QMessageBox {
+}}
+QMessageBox {{
     background: #F4F5F8;
-}
-QMessageBox QLabel {
+}}
+QMessageBox QLabel {{
     color: #1F2330;
     font-size: 13px;
-}
+}}
 """
+
+# F-10: Windows named-mutex handle. Must stay alive for the process lifetime
+# — once it goes out of scope the OS releases the mutex and a second instance
+# could start. Stored at module scope so it is never GC'd.
+_singleton_mutex = None
+
+
+def _acquire_single_instance_lock() -> bool:
+    """Try to grab a global named mutex. Returns True if this is the first
+    instance, False if another instance already holds it. On non-Windows or
+    ctypes failure, always returns True (no enforcement)."""
+    global _singleton_mutex
+    try:
+        kernel32 = ctypes.windll.kernel32
+        # CreateMutexW(lpMutexAttributes, bInitialOwner, lpName) → HANDLE.
+        # We keep the handle alive via _singleton_mutex for the whole process.
+        kernel32.CreateMutexW.restype = ctypes.c_void_p
+        _singleton_mutex = kernel32.CreateMutexW(
+            None, False, "Global\\GeminiLiveTranslate"
+        )
+        # ERROR_ALREADY_EXISTS (183) means another process owns the mutex.
+        return kernel32.GetLastError() != 183
+    except Exception:
+        return True
 
 
 class LiveBuddyApp(QObject):
@@ -84,6 +117,8 @@ class LiveBuddyApp(QObject):
         self.client.outputTranscript.connect(self._on_output_transcript)
         self.client.audioChunk.connect(self._on_audio_chunk)
         self.client.status.connect(self._on_client_status)
+        # P-6: cumulative dropped-chunk counter → HUD drops indicator.
+        self.client.stats.connect(self._on_stats)
         self.client.connected.connect(self._on_connected)
         self.client.disconnected.connect(self._on_disconnected)
 
@@ -93,8 +128,8 @@ class LiveBuddyApp(QObject):
         if not self.settings.api_key:
             QMessageBox.warning(
                 None,
-                "API key required",
-                "Please set your Google Gemini API key in Settings.",
+                tr("app.api_key_required"),
+                tr("app.api_key_msg"),
             )
             self.open_settings()
             return
@@ -107,7 +142,11 @@ class LiveBuddyApp(QObject):
                 )
                 self.player.start()
             except Exception as e:
-                QMessageBox.warning(None, "Playback error", f"Could not open audio output:\n{e}")
+                QMessageBox.warning(
+                    None,
+                    tr("app.playback_error"),
+                    tr("app.playback_error_msg", error=str(e)),
+                )
                 self.player = None
 
         # Audio capture is deferred to _on_connected() so we don't silently
@@ -128,13 +167,14 @@ class LiveBuddyApp(QObject):
             self.is_running = False
             self.hud.set_running_state(False)
             self.hud.set_status(
-                self.client.last_start_error() or "Could not start Gemini session"
+                self.client.last_start_error() or tr("status.start_failed"),
+                KIND_ERROR,
             )
             return
         self._active_client_session_id = session_id
         self.is_running = True
         self.hud.set_running_state(True)
-        self.hud.set_status("Connecting...")
+        self.hud.set_status(tr("status.connecting"), KIND_CONNECTING)
 
     def stop(self) -> None:
         if not self.is_running:
@@ -147,7 +187,7 @@ class LiveBuddyApp(QObject):
         self._stop_audio_player()
         self.client.stop()
         self.hud.set_running_state(False)
-        self.hud.set_status("Stopped")
+        self.hud.set_status(tr("status.stopped"), KIND_IDLE)
 
     def toggle(self) -> None:
         if self.is_running:
@@ -190,8 +230,8 @@ class LiveBuddyApp(QObject):
         except Exception as e:
             QMessageBox.critical(
                 self.hud,
-                "Settings error",
-                f"Failed to open settings dialog:\n{e}",
+                tr("app.settings_error"),
+                tr("app.settings_error_msg", error=str(e)),
             )
 
     # ---------- internals ----------
@@ -207,9 +247,17 @@ class LiveBuddyApp(QObject):
         if self._is_current_client_session(session_id):
             self.hud.set_output(text)
 
-    def _on_client_status(self, session_id: int, status: str) -> None:
+    def _on_client_status(self, session_id: int, kind: str, message: str) -> None:
+        # UI-2 + C-3: kind drives the HUD dot color directly; message is
+        # already localized by GeminiClient via i18n.tr().
         if self._is_current_client_session(session_id):
-            self.hud.set_status(status)
+            self.hud.set_status(message, kind)
+
+    def _on_stats(self, session_id: int, pending: int, dropped: int) -> None:
+        # P-6: surface the cumulative dropped-chunk count on the HUD so the
+        # user knows audio is being lost to network backpressure.
+        if self._is_current_client_session(session_id):
+            self.hud.set_drops(dropped)
 
     def _on_audio_chunk(self, session_id: int, data: bytes) -> None:
         if not self._is_current_client_session(session_id):
@@ -220,7 +268,7 @@ class LiveBuddyApp(QObject):
     def _on_connected(self, session_id: int) -> None:
         if not self._is_current_client_session(session_id):
             return
-        self.hud.set_status("Connected")
+        self.hud.set_status(tr("status.connected"), KIND_CONNECTED)
         # Start audio capture now that the WebSocket is up, so no audio is
         # wasted during the connection phase. On reconnect, capture is already
         # running (it was never stopped — _on_disconnected is only called on
@@ -237,8 +285,12 @@ class LiveBuddyApp(QObject):
             except Exception as e:
                 QMessageBox.critical(
                     self.hud,
-                    "Capture error",
-                    f"Could not start audio capture ({self.settings.audio_source}):\n{e}",
+                    tr("app.capture_error"),
+                    tr(
+                        "app.capture_error_msg",
+                        source=self.settings.audio_source,
+                        error=str(e),
+                    ),
                 )
                 self._stop_audio_player()
                 self.capture = None
@@ -246,7 +298,7 @@ class LiveBuddyApp(QObject):
                 self.is_running = False
                 self._active_client_session_id = None
                 self.hud.set_running_state(False)
-                self.hud.set_status("Capture error")
+                self.hud.set_status(tr("status.capture_error"), KIND_ERROR)
 
     def _on_disconnected(self, session_id: int, reason: str) -> None:
         if not self._is_current_client_session(session_id):
@@ -260,7 +312,14 @@ class LiveBuddyApp(QObject):
             self.is_running = False
             self._active_client_session_id = None
             self.hud.set_running_state(False)
-        self.hud.set_status(f"Disconnected: {reason}" if reason else "Disconnected")
+        # reason is raw (non-localized) diagnostic text from GeminiClient.
+        # If present, embed it; otherwise show a plain "Disconnected".
+        if reason:
+            self.hud.set_status(
+                tr("status.disconnected_reason", reason=reason), KIND_ERROR
+            )
+        else:
+            self.hud.set_status(tr("status.disconnected"), KIND_ERROR)
 
     def _stop_audio_player(self) -> None:
         if self.player is not None:
@@ -277,6 +336,12 @@ def main() -> int:
     app.setApplicationName("gemini-live-translate")
     app.setStyleSheet(GLOBAL_QSS)
 
+    # F-10: single-instance enforcement via a global named mutex. If another
+    # process already owns the mutex, warn the user and exit silently.
+    if not _acquire_single_instance_lock():
+        QMessageBox.warning(None, tr("app.title"), tr("app.already_running"))
+        return 0
+
     controller = LiveBuddyApp()
 
     # system tray
@@ -287,7 +352,7 @@ def main() -> int:
     except Exception:
         icon = QIcon()
     tray.setIcon(icon if not icon.isNull() else QIcon())
-    tray.setToolTip("Gemini Live Translate")
+    tray.setToolTip(tr("app.title"))
 
     def _show_hud():
         controller.hud.show()
@@ -295,13 +360,13 @@ def main() -> int:
         controller.hud.activateWindow()
 
     menu = QMenu()
-    act_toggle = QAction("Start / Stop", menu)
+    act_toggle = QAction(tr("tray.toggle"), menu)
     act_toggle.triggered.connect(controller.toggle)
-    act_settings = QAction("Settings...", menu)
+    act_settings = QAction(tr("tray.settings"), menu)
     act_settings.triggered.connect(controller.open_settings)
-    act_show = QAction("Show HUD", menu)
+    act_show = QAction(tr("tray.show_hud"), menu)
     act_show.triggered.connect(_show_hud)
-    act_quit = QAction("Quit", menu)
+    act_quit = QAction(tr("tray.quit"), menu)
     act_quit.triggered.connect(app.quit)
     # HUD Exit button and tray Quit both just call app.quit(); the actual
     # session cleanup happens in _on_about_to_quit (single place, no

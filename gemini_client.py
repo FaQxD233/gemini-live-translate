@@ -17,14 +17,13 @@ from typing import Optional
 import websockets
 from PySide6.QtCore import QObject, Signal
 
-# Default Google Gemini official endpoint. The user can override this with
-# a self-hosted proxy or regional mirror in Settings.
-DEFAULT_API_BASE = "https://generativelanguage.googleapis.com"
+from i18n import tr
+from settings import DEFAULT_API_BASE, DEFAULT_GEMINI_MODEL
+
 # WebSocket path appended to the (scheme-swapped) API base.
 GEMINI_WS_PATH = (
     "/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent"
 )
-GEMINI_MODEL = "models/gemini-3.5-live-translate-preview"
 SETUP_TIMEOUT_SEC = 8.0
 MAX_PENDING_SENDS = 20
 # Max consecutive setup timeouts before giving up (avoids infinite reconnect
@@ -34,13 +33,25 @@ MAX_SETUP_FAILURES = 3
 # Minimum interval between "audio dropped" status emissions (seconds).
 DROP_WARN_INTERVAL_SEC = 5.0
 
+# Status kinds emitted on the `status` signal. The HUD maps these to colors
+# directly (no string matching on the localized message).
+KIND_IDLE = "idle"
+KIND_CONNECTING = "connecting"
+KIND_CONNECTED = "connected"
+KIND_ERROR = "error"
+KIND_WARNING = "warning"
+KIND_INFO = "info"
+
 
 class GeminiClient(QObject):
-    # UI-facing signals (emitted from the asyncio thread; Qt cross-thread safe)
+    # UI-facing signals (emitted from the asyncio thread; Qt cross-thread safe).
+    # status: (session_id, kind, message)  — kind is one of KIND_* above,
+    # message is already localized via i18n.tr().
     inputTranscript = Signal(int, str)
     outputTranscript = Signal(int, str)
     audioChunk = Signal(int, bytes)
-    status = Signal(int, str)
+    status = Signal(int, str, str)
+    stats = Signal(int, int, int)  # (session_id, pending_sends, total_dropped)
     connected = Signal(int)
     disconnected = Signal(int, str)
 
@@ -54,7 +65,7 @@ class GeminiClient(QObject):
         self._target_lang = "es"
         self._system_prompt = ""
         self._echo = False
-        self._model = GEMINI_MODEL
+        self._model = DEFAULT_GEMINI_MODEL
         self._running = False
         self._state_lock = threading.Lock()
         self._stop_event = threading.Event()
@@ -64,6 +75,9 @@ class GeminiClient(QObject):
         self._consecutive_setup_failures = 0
         self._last_drop_warn = 0.0
         self._last_start_error = ""
+        # P-6: cumulative count of audio chunks dropped due to network
+        # backpressure for this session. Reset on start().
+        self._total_dropped = 0
 
     def configure(
         self,
@@ -72,14 +86,14 @@ class GeminiClient(QObject):
         system_prompt: str,
         echo_target_language: bool,
         api_base: str = DEFAULT_API_BASE,
-        model: str = GEMINI_MODEL,
+        model: str = DEFAULT_GEMINI_MODEL,
     ) -> None:
         self._api_key = api_key.strip()
         self._api_base = (api_base or DEFAULT_API_BASE).strip()
         self._target_lang = target_lang
         self._system_prompt = system_prompt
         self._echo = echo_target_language
-        self._model = (model or GEMINI_MODEL).strip()
+        self._model = (model or DEFAULT_GEMINI_MODEL).strip()
 
     def _build_ws_url(self) -> str:
         """Build the WebSocket URL from the configured API base.
@@ -110,6 +124,7 @@ class GeminiClient(QObject):
             self._send_generation += 1
             self._pending_sends = 0
             self._consecutive_setup_failures = 0
+            self._total_dropped = 0
             self._stop_event.clear()
             self._running = True
             self._thread = threading.Thread(
@@ -160,6 +175,7 @@ class GeminiClient(QObject):
         }
         text = json.dumps(msg)
         drop_warn = False
+        emit_stats = False
         should_send = False
         with self._state_lock:
             loop = self._loop
@@ -174,16 +190,22 @@ class GeminiClient(QObject):
             if self._pending_sends >= MAX_PENDING_SENDS:
                 # Backpressure: too many in-flight sends. Drop this chunk
                 # but warn the user (throttled) so they know audio is lagging.
+                self._total_dropped += 1
                 now = time.monotonic()
                 if now - self._last_drop_warn >= DROP_WARN_INTERVAL_SEC:
                     self._last_drop_warn = now
                     drop_warn = True
+                emit_stats = True
             else:
                 self._pending_sends += 1
                 should_send = True
 
         if drop_warn:
-            self.status.emit(session_id, "Network slow — audio being dropped")
+            self.status.emit(
+                session_id, KIND_WARNING, tr("status.network_slow")
+            )
+        if emit_stats:
+            self.stats.emit(session_id, self._pending_sends, self._total_dropped)
         if not should_send:
             return
         try:
@@ -195,7 +217,9 @@ class GeminiClient(QObject):
             )
         except Exception as e:
             self._decrement_pending_send(send_generation)
-            self.status.emit(session_id, f"Send failed: {e}")
+            self.status.emit(
+                session_id, KIND_ERROR, tr("status.send_failed", msg=str(e))
+            )
 
     def _decrement_pending_send(self, send_generation: int) -> None:
         with self._state_lock:
@@ -211,7 +235,9 @@ class GeminiClient(QObject):
         except Exception:
             return
         if exc is not None and self._is_active(session_id):
-            self.status.emit(session_id, f"Send failed: {exc}")
+            self.status.emit(
+                session_id, KIND_ERROR, tr("status.send_failed", msg=str(exc))
+            )
 
     def _is_active(self, session_id: int) -> bool:
         with self._state_lock:
@@ -238,7 +264,9 @@ class GeminiClient(QObject):
                 try:
                     loop.run_until_complete(self._main(session_id))
                 except Exception as e:
-                    self.status.emit(session_id, f"Gemini error: {e}")
+                    self.status.emit(
+                        session_id, KIND_ERROR, tr("status.gemini_error", msg=str(e))
+                    )
                     self._last_error = str(e)
                     self._reconnect_ok = False
 
@@ -252,7 +280,11 @@ class GeminiClient(QObject):
                 if getattr(self, "_was_connected", False):
                     reconnect_delay = 1.0
 
-                self.status.emit(session_id, f"Reconnecting in {int(reconnect_delay)}s...")
+                self.status.emit(
+                    session_id,
+                    KIND_CONNECTING,
+                    tr("status.reconnecting", secs=int(reconnect_delay)),
+                )
                 # Sleep in small increments so user stop is detected quickly
                 slept = 0.0
                 while self._is_active(session_id) and slept < reconnect_delay:
@@ -267,7 +299,10 @@ class GeminiClient(QObject):
                     self._running = False
                     should_emit = True
             if should_emit:
-                reason = getattr(self, "_last_error", "") or "Session ended"
+                # _last_error holds a raw (non-localized) reason when set;
+                # main.py decides how to localize it for display. Leaving it
+                # empty lets the HUD show a plain "Disconnected" message.
+                reason = getattr(self, "_last_error", "")
                 self.disconnected.emit(session_id, reason)
         finally:
             loop.close()
@@ -300,7 +335,9 @@ class GeminiClient(QObject):
                         self._ws = ws
                         self._send_generation += 1
                         self._pending_sends = 0
-                self.status.emit(session_id, "Gemini socket opened")
+                self.status.emit(
+                    session_id, KIND_CONNECTING, tr("status.socket_opened")
+                )
                 await self._send_setup()
                 try:
                     await asyncio.wait_for(
@@ -312,16 +349,20 @@ class GeminiClient(QObject):
                     if self._consecutive_setup_failures >= MAX_SETUP_FAILURES:
                         self.status.emit(
                             session_id,
-                            "Gemini setup timed out repeatedly. "
-                            "Check model name and API key."
+                            KIND_ERROR,
+                            tr("status.setup_timeout_final"),
                         )
                         self._last_error = "Setup timed out (repeated)"
                         self._reconnect_ok = False
                     else:
                         self.status.emit(
                             session_id,
-                            f"Gemini setup timed out "
-                            f"(attempt {self._consecutive_setup_failures}/{MAX_SETUP_FAILURES})"
+                            KIND_ERROR,
+                            tr(
+                                "status.setup_timeout",
+                                n=self._consecutive_setup_failures,
+                                total=MAX_SETUP_FAILURES,
+                            ),
                         )
                         self._last_error = "Setup timed out"
                         self._reconnect_ok = True
@@ -330,7 +371,9 @@ class GeminiClient(QObject):
                 self._consecutive_setup_failures = 0
                 if not self._is_active(session_id):
                     return
-                self.status.emit(session_id, "Gemini session ready")
+                self.status.emit(
+                    session_id, KIND_CONNECTING, tr("status.session_ready")
+                )
                 self.connected.emit(session_id)
                 self._was_connected = True
 
@@ -339,16 +382,22 @@ class GeminiClient(QObject):
                     if not self._is_active(session_id):
                         break
         except websockets.ConnectionClosed:
-            self._last_error = "Connection closed"
+            # Clean disconnect — no extra reason to surface; main.py shows a
+            # plain "Disconnected" via tr("status.disconnected").
+            self._last_error = ""
             self._reconnect_ok = True
         except OSError as e:
             # Network errors (DNS failure, connection refused, host unreachable,
             # etc.) are potentially transient — allow reconnection with backoff.
-            self.status.emit(session_id, f"Gemini network error: {e}")
+            self.status.emit(
+                session_id, KIND_ERROR, tr("status.gemini_network_error", msg=str(e))
+            )
             self._last_error = str(e)
             self._reconnect_ok = True
         except Exception as e:
-            self.status.emit(session_id, f"Gemini error: {e}")
+            self.status.emit(
+                session_id, KIND_ERROR, tr("status.gemini_error", msg=str(e))
+            )
             self._last_error = str(e)
             self._reconnect_ok = False
         finally:
@@ -400,7 +449,9 @@ class GeminiClient(QObject):
         try:
             root = json.loads(raw)
         except Exception as e:
-            self.status.emit(session_id, f"Parse failed: {e}")
+            self.status.emit(
+                session_id, KIND_ERROR, tr("status.parse_failed", msg=str(e))
+            )
             return
         await self._handle_root(session_id, root)
 
@@ -410,7 +461,9 @@ class GeminiClient(QObject):
         err = root.get("error")
         if isinstance(err, dict):
             message = err.get("message", "Unknown Gemini error")
-            self.status.emit(session_id, f"Gemini error: {message}")
+            self.status.emit(
+                session_id, KIND_ERROR, tr("status.gemini_error", msg=message)
+            )
             raise RuntimeError(message)
         content = root.get("serverContent")
         if not isinstance(content, dict):

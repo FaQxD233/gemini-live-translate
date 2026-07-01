@@ -70,6 +70,9 @@ class AudioCapture:
         self._queue: Queue[tuple[bytes, int, int]] = Queue(maxsize=CAPTURE_QUEUE_SIZE)
         self._stop_event = threading.Event()
         self._worker: Optional[threading.Thread] = None
+        # P-3: diagnostic counter of chunks dropped because the processing
+        # worker fell behind. Read via `dropped_chunks` on stop for logging.
+        self._dropped_chunks = 0
 
     def start(self) -> None:
         if self._stream is not None:
@@ -117,6 +120,10 @@ class AudioCapture:
             self._stop_worker()
             raise
 
+    @property
+    def dropped_chunks(self) -> int:
+        return self._dropped_chunks
+
     def _callback(self, in_data: bytes, frame_count: int, time_info, status) -> tuple:
         # Keep the realtime callback light; processing happens on a worker.
         try:
@@ -124,6 +131,8 @@ class AudioCapture:
             try:
                 self._queue.put_nowait(item)
             except Full:
+                # P-3: count the drop for diagnostics, then make room.
+                self._dropped_chunks += 1
                 try:
                     self._queue.get_nowait()
                 except Empty:
@@ -190,6 +199,10 @@ class AudioPlayer:
         self._buffers: Deque[np.ndarray] = deque()
         self._buffer_samples = 0
         self._stream = None
+        # P-4: cache silent frames by frame_count so the playback callback
+        # doesn't reallocate a zeros buffer on every tick while idle (which
+        # is the common state when no translated audio is arriving).
+        self._silence_cache: dict[int, bytes] = {}
 
     def start(self) -> None:
         if self._stream is not None:
@@ -233,8 +246,16 @@ class AudioPlayer:
                     self._buffer_samples -= overflow
 
     def _callback(self, in_data: bytes, frame_count: int, time_info, status) -> tuple:
-        out = np.zeros(frame_count, dtype=np.float32)
         with self._lock:
+            if not self._buffers:
+                # P-4: reuse a cached silent buffer instead of allocating
+                # np.zeros + tobytes() on every idle callback tick.
+                buf = self._silence_cache.get(frame_count)
+                if buf is None:
+                    buf = np.zeros(frame_count, dtype=np.float32).tobytes()
+                    self._silence_cache[frame_count] = buf
+                return (buf, pyaudio.paContinue)
+            out = np.zeros(frame_count, dtype=np.float32)
             pos = 0
             remaining = frame_count
             volume = self.volume
