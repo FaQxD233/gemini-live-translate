@@ -17,7 +17,8 @@ LANGUAGES = [
     ("it", "Italian"),
     ("ja", "Japanese"),
     ("ko", "Korean"),
-    ("zh", "Chinese"),
+    ("zh-CN", "Chinese (Simplified)"),
+    ("zh-TW", "Chinese (Traditional)"),
     ("vi", "Vietnamese"),
     ("pt", "Portuguese"),
     ("ru", "Russian"),
@@ -37,7 +38,7 @@ DEFAULT_GEMINI_MODEL = "models/gemini-3.5-live-translate-preview"
 class AppSettings:
     api_key: str = ""
     api_base: str = DEFAULT_API_BASE  # override for OpenAI-compatible proxies
-    target_language: str = "zh"
+    target_language: str = "zh-CN"
     audio_source: str = "system"  # "mic" | "system"
     font_size: int = 16
     bg_opacity: float = 0.6  # 0..1
@@ -91,9 +92,11 @@ class AppSettings:
         valid_languages = {code for code, _ in LANGUAGES}
         self.api_key = self._coerce_str(self.api_key)
         self.api_base = self._coerce_str(self.api_base, DEFAULT_API_BASE).strip() or DEFAULT_API_BASE
-        self.target_language = self._coerce_str(self.target_language, "zh")
+        self.target_language = self._coerce_str(self.target_language, "zh-CN")
+        if self.target_language == "zh":
+            self.target_language = "zh-CN"
         if self.target_language not in valid_languages:
-            self.target_language = "zh"
+            self.target_language = "zh-CN"
         self.audio_source = self._coerce_str(self.audio_source, "system")
         if self.audio_source not in {"mic", "system"}:
             self.audio_source = "system"

@@ -329,7 +329,7 @@ class SettingsDialog(QDialog):
         settings.api_key = self.api_key_edit.text().strip()
         # Empty api_base → use official Google endpoint (handled by client).
         settings.api_base = self.api_base_edit.text().strip() or DEFAULT_API_BASE
-        settings.target_language = self.lang_combo.currentData() or "zh"
+        settings.target_language = self.lang_combo.currentData() or "zh-CN"
         settings.audio_source = self.source_combo.currentData() or "system"
         settings.font_size = self.font_slider.value()
         settings.bg_opacity = self.opacity_slider.value() / 100.0
