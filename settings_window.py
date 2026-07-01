@@ -7,7 +7,7 @@ import threading
 
 import websockets
 from PySide6.QtCore import QObject, Qt, Signal
-from PySide6.QtGui import QColor
+from PySide6.QtGui import QColor, QGuiApplication
 from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
@@ -20,6 +20,7 @@ from PySide6.QtWidgets import (
     QLabel,
     QLineEdit,
     QPushButton,
+    QScrollArea,
     QSlider,
     QTextEdit,
     QVBoxLayout,
@@ -29,16 +30,31 @@ from PySide6.QtWidgets import (
 from gemini_client import GEMINI_WS_PATH
 from i18n import tr
 from settings import DEFAULT_API_BASE, DEFAULT_GEMINI_MODEL, LANGUAGES, AppSettings
-from theme import ACCENT, ACCENT_BRIGHT as ACCENT_HOVER, ACCENT_PRESSED, FONT_FAMILY_QSS
+from theme import (
+    ACCENT,
+    ACCENT_BRIGHT as ACCENT_HOVER,
+    ACCENT_PRESSED,
+    COLOR_ERROR,
+    COLOR_SUCCESS,
+    FONT_FAMILY_QSS,
+    RADIUS_CARD_SETTINGS,
+    RADIUS_INPUT,
+    SETTINGS_BG,
+    SETTINGS_CARD_BG,
+    SETTINGS_CARD_BORDER,
+    SETTINGS_INPUT_BORDER,
+    SETTINGS_TEXT_PRIMARY,
+    SETTINGS_TEXT_SECONDARY,
+)
 
 # Global QSS applied to the dialog so all child widgets share the same theme.
 DIALOG_QSS = f"""
 QDialog {{
-    background-color: #F4F5F8;
+    background-color: {SETTINGS_BG};
     font-family: {FONT_FAMILY_QSS};
 }}
 QLabel {{
-    color: #1F2330;
+    color: {SETTINGS_TEXT_PRIMARY};
     font-size: 13px;
 }}
 QLabel#sectionTitle {{
@@ -49,15 +65,15 @@ QLabel#sectionTitle {{
     padding: 2px 0 6px 0;
 }}
 QFrame#card {{
-    background: white;
-    border: 1px solid #E3E6EC;
-    border-radius: 10px;
+    background: {SETTINGS_CARD_BG};
+    border: 1px solid {SETTINGS_CARD_BORDER};
+    border-radius: {RADIUS_CARD_SETTINGS}px;
 }}
 QLineEdit, QComboBox, QTextEdit {{
-    background: white;
-    color: #1F2330;
-    border: 1px solid #D2D6DF;
-    border-radius: 7px;
+    background: {SETTINGS_CARD_BG};
+    color: {SETTINGS_TEXT_PRIMARY};
+    border: 1px solid {SETTINGS_INPUT_BORDER};
+    border-radius: {RADIUS_INPUT}px;
     padding: 6px 10px;
     selection-background-color: {ACCENT};
     selection-color: white;
@@ -75,13 +91,13 @@ QComboBox::down-arrow {{
     width: 0; height: 0;
     border-left: 4px solid transparent;
     border-right: 4px solid transparent;
-    border-top: 5px solid #6A6F7D;
+    border-top: 5px solid {SETTINGS_TEXT_SECONDARY};
     margin-right: 8px;
 }}
 QComboBox QAbstractItemView {{
-    background: white;
-    color: #1F2330;
-    border: 1px solid #D2D6DF;
+    background: {SETTINGS_CARD_BG};
+    color: {SETTINGS_TEXT_PRIMARY};
+    border: 1px solid {SETTINGS_INPUT_BORDER};
     border-radius: 6px;
     selection-background-color: {ACCENT};
     selection-color: white;
@@ -90,14 +106,14 @@ QComboBox QAbstractItemView {{
 }}
 QCheckBox {{
     spacing: 8px;
-    color: #1F2330;
+    color: {SETTINGS_TEXT_PRIMARY};
     font-size: 13px;
 }}
 QCheckBox::indicator {{
     width: 16px; height: 16px;
     border: 1px solid #C3C8D2;
     border-radius: 4px;
-    background: white;
+    background: {SETTINGS_CARD_BG};
 }}
 QCheckBox::indicator:hover {{
     border: 1px solid {ACCENT};
@@ -109,7 +125,7 @@ QCheckBox::indicator:checked {{
 }}
 QSlider::groove:horizontal {{
     height: 6px;
-    background: #E3E6EC;
+    background: {SETTINGS_CARD_BORDER};
     border-radius: 3px;
 }}
 QSlider::sub-page:horizontal {{
@@ -117,7 +133,7 @@ QSlider::sub-page:horizontal {{
     border-radius: 3px;
 }}
 QSlider::handle:horizontal {{
-    background: white;
+    background: {SETTINGS_CARD_BG};
     border: 2px solid {ACCENT};
     width: 14px;
     height: 14px;
@@ -129,10 +145,10 @@ QSlider::handle:horizontal:hover {{
     border: 2px solid {ACCENT_HOVER};
 }}
 QPushButton {{
-    background: white;
-    color: #1F2330;
-    border: 1px solid #D2D6DF;
-    border-radius: 7px;
+    background: {SETTINGS_CARD_BG};
+    color: {SETTINGS_TEXT_PRIMARY};
+    border: 1px solid {SETTINGS_INPUT_BORDER};
+    border-radius: {RADIUS_INPUT}px;
     padding: 7px 16px;
     font-size: 13px;
     font-weight: 500;
@@ -162,7 +178,7 @@ QPushButton#primary:pressed {{
     padding: 8px 16px 6px 16px;
 }}
 QPushButton#testBtn {{
-    background: white;
+    background: {SETTINGS_CARD_BG};
     border: 1px solid {ACCENT};
     color: {ACCENT};
     font-weight: 600;
@@ -173,10 +189,17 @@ QPushButton#testBtn:hover {{
 }}
 QPushButton#testBtn:disabled {{
     color: #9AA0AB;
-    border-color: #D2D6DF;
+    border-color: {SETTINGS_INPUT_BORDER};
 }}
-QLabel#testResultOk   {{ color: #1A8A4A; font-size: 12px; }}
-QLabel#testResultFail {{ color: #C0392B; font-size: 12px; }}
+QLabel#testResultOk   {{ color: {COLOR_SUCCESS}; font-size: 12px; }}
+QLabel#testResultFail {{ color: {COLOR_ERROR}; font-size: 12px; }}
+QScrollArea {{
+    background: transparent;
+    border: none;
+}}
+QScrollArea > QWidget > QWidget {{
+    background: transparent;
+}}
 """
 
 
@@ -280,18 +303,27 @@ class SettingsDialog(QDialog):
         outer.setContentsMargins(20, 20, 20, 20)
         outer.setSpacing(12)
 
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.NoFrame)
+        scroll_content = QWidget()
+        scroll.setWidget(scroll_content)
+        content = QVBoxLayout(scroll_content)
+        content.setContentsMargins(0, 0, 0, 0)
+        content.setSpacing(12)
+
         # ---------- Header ----------
         title = QLabel(tr("settings.title"))
         title.setStyleSheet(
-            "font-size: 18px; font-weight: 700; color: #1F2330; padding: 0 0 4px 0;"
+            f"font-size: 18px; font-weight: 700; color: {SETTINGS_TEXT_PRIMARY}; padding: 0 0 4px 0;"
         )
-        outer.addWidget(title)
+        content.addWidget(title)
         subtitle = QLabel(tr("settings.subtitle"))
-        subtitle.setStyleSheet("color: #6A6F7D; font-size: 11px;")
-        outer.addWidget(subtitle)
+        subtitle.setStyleSheet(f"color: {SETTINGS_TEXT_SECONDARY}; font-size: 11px;")
+        content.addWidget(subtitle)
 
         # ---------- Connection card ----------
-        outer.addWidget(self._section_title(tr("settings.section.connection"), "🔗"))
+        content.addWidget(self._section_title(tr("settings.section.connection")))
         conn_card, conn_form = self._make_card()
         self.api_key_edit = QLineEdit(settings.api_key)
         self.api_key_edit.setEchoMode(QLineEdit.Password)
@@ -332,10 +364,10 @@ class SettingsDialog(QDialog):
         test_row.addWidget(self.test_btn)
         test_row.addWidget(self.test_result_label, 1)
         conn_form.addRow("", self._wrap(test_row))
-        outer.addWidget(conn_card)
+        content.addWidget(conn_card)
 
         # ---------- Audio card ----------
-        outer.addWidget(self._section_title(tr("settings.section.audio")))
+        content.addWidget(self._section_title(tr("settings.section.audio")))
         audio_card, audio_form = self._make_card()
         self.source_combo = QComboBox()
         self.source_combo.addItem(tr("settings.source_system"), "system")
@@ -353,10 +385,10 @@ class SettingsDialog(QDialog):
         self.echo_check = QCheckBox(tr("settings.echo"))
         self.echo_check.setChecked(settings.echo_target_language)
         audio_form.addRow("", self.echo_check)
-        outer.addWidget(audio_card)
+        content.addWidget(audio_card)
 
         # ---------- Appearance card ----------
-        outer.addWidget(self._section_title(tr("settings.section.appearance"), "🎨"))
+        content.addWidget(self._section_title(tr("settings.section.appearance")))
         app_card, app_form = self._make_card()
         self.font_slider, self.font_label = self._make_slider(
             settings.font_size, lambda v: f"{v} pt"
@@ -373,10 +405,10 @@ class SettingsDialog(QDialog):
         self.show_original_check = QCheckBox(tr("settings.show_original"))
         self.show_original_check.setChecked(settings.show_original)
         app_form.addRow("", self.show_original_check)
-        outer.addWidget(app_card)
+        content.addWidget(app_card)
 
         # ---------- Advanced card ----------
-        outer.addWidget(self._section_title(tr("settings.section.advanced")))
+        content.addWidget(self._section_title(tr("settings.section.advanced")))
         adv_card, adv_form = self._make_card()
         self.model_edit = QLineEdit(settings.gemini_model)
         self.model_edit.setPlaceholderText(DEFAULT_GEMINI_MODEL)
@@ -386,9 +418,10 @@ class SettingsDialog(QDialog):
         self.prompt_edit.setMaximumHeight(90)
         self.prompt_edit.setPlaceholderText(tr("settings.prompt_placeholder"))
         adv_form.addRow(tr("settings.system_prompt"), self.prompt_edit)
-        outer.addWidget(adv_card)
+        content.addWidget(adv_card)
 
-        outer.addStretch(1)
+        content.addStretch(1)
+        outer.addWidget(scroll, 1)
 
         # ---------- Buttons ----------
         btns = QDialogButtonBox(QDialogButtonBox.Save | QDialogButtonBox.Cancel)
@@ -400,6 +433,7 @@ class SettingsDialog(QDialog):
         outer.addWidget(btns)
 
         self.setStyleSheet(DIALOG_QSS)
+        self._fit_to_screen()
 
     # ---------- helpers ----------
 
@@ -426,6 +460,13 @@ class SettingsDialog(QDialog):
         form.setContentsMargins(0, 0, 0, 0)
         layout.addLayout(form)
         return card, form
+
+    def _fit_to_screen(self) -> None:
+        screen = self.screen() or QGuiApplication.primaryScreen()
+        if screen is None:
+            return
+        available = screen.availableGeometry()
+        self.resize(min(620, available.width() - 80), min(760, available.height() - 80))
 
     def _make_slider(self, value: int, fmt) -> tuple[QSlider, QLabel]:
         s = QSlider(Qt.Horizontal)

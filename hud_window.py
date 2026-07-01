@@ -63,6 +63,7 @@ from theme import (
     RADIUS_BADGE,
     RADIUS_BUTTON,
     RADIUS_CARD_HUD,
+    COLOR_WARNING,
     STATUS_COLORS,
 )
 
@@ -72,6 +73,11 @@ OUTPUT_VISIBLE_LINES = 5
 INPUT_VISIBLE_LINES = 3
 CONTROL_BAR_HEIGHT = 40  # expanded height; collapses to 0 when not hovering
 RESIZE_GRIP_SIZE = 18  # corner grip hit area
+HUD_IDEAL_MIN_WIDTH = 560
+HUD_COMPACT_MIN_WIDTH = 380
+CAPTION_IDEAL_MIN_WIDTH = 420
+CAPTION_COMPACT_MIN_WIDTH = 280
+SCREEN_MARGIN = 24
 
 # Status kind → dot color. Built from theme tokens so palette stays in sync.
 KIND_COLORS = {k: QColor(*rgb) for k, rgb in STATUS_COLORS.items()}
@@ -361,10 +367,9 @@ class HUDWindow(QWidget):
         self._refresh_timer.timeout.connect(self._do_refresh)
 
         self.resize(720, 260)
-        # Keep the panel wide enough that captions have room to wrap.
-        # Prevents the user from shrinking via QSizeGrip to a width where
-        # only ~6-7 chars fit per line.
-        self.setMinimumWidth(560)
+        # Keep captions readable, but allow narrower HUDs on small/portrait
+        # screens instead of forcing a fixed desktop-width minimum everywhere.
+        self._apply_screen_aware_widths()
         self.apply_style()
 
     # ---------- private helpers ----------
@@ -411,7 +416,7 @@ class HUDWindow(QWidget):
         edit.setWordWrapMode(QTextOption.WrapAtWordBoundaryOrAnywhere)
         # Reserve a sane minimum so layout never shrinks the editor below
         # ~30 CJK chars per line at 16pt.
-        edit.setMinimumWidth(420)
+        edit.setMinimumWidth(CAPTION_IDEAL_MIN_WIDTH)
         # Let the surrounding eventFilter handle mouse interaction (drag).
         edit.setAttribute(Qt.WA_TransparentForMouseEvents, False)
         edit.setMouseTracking(False)
@@ -440,7 +445,7 @@ class HUDWindow(QWidget):
 
         # Input (original) font
         in_f = QFont()
-        in_f.setFamily("Segoe UI")
+        in_f.setFamilies(FONT_FAMILIES)
         in_f.setPointSize(max(10, int(s.font_size * 0.6)))
         in_f.setBold(False)
         self.input_edit.setFont(in_f)
@@ -495,7 +500,7 @@ class HUDWindow(QWidget):
         QLabel#statusText {{ color: {HUD_TEXT_SECONDARY}; font-size: 11px; }}
         QLabel#dragHint   {{ color: {HUD_TEXT_TERTIARY}; font-size: 10px; }}
         QLabel#dropsLabel {{
-            color: #FF9F43;
+            color: {COLOR_WARNING};
             background: rgba(255, 159, 67, 40);
             border-radius: {RADIUS_BUTTON}px;
             padding: 2px 8px;
@@ -691,13 +696,33 @@ class HUDWindow(QWidget):
         if not screens:
             return
         geo = self.frameGeometry()
-        for s in screens:
-            if s.geometry().intersects(geo):
-                return  # at least partially visible
-        primary = QGuiApplication.primaryScreen()
-        if primary is not None:
-            sg = primary.availableGeometry()
-            self.move(sg.center() - self.rect().center())
+        screen = next((s for s in screens if s.geometry().intersects(geo)), None)
+        if screen is None:
+            screen = QGuiApplication.primaryScreen()
+        if screen is None:
+            return
+        self._apply_screen_aware_widths(screen.availableGeometry().width())
+        available = screen.availableGeometry().adjusted(
+            SCREEN_MARGIN, SCREEN_MARGIN, -SCREEN_MARGIN, -SCREEN_MARGIN
+        )
+        if self.width() > available.width() or self.height() > available.height():
+            self.resize(min(self.width(), available.width()), min(self.height(), available.height()))
+        x = min(max(self.x(), available.left()), max(available.left(), available.right() - self.width()))
+        y = min(max(self.y(), available.top()), max(available.top(), available.bottom() - self.height()))
+        if (x, y) != (self.x(), self.y()):
+            self.move(x, y)
+
+    def _apply_screen_aware_widths(self, screen_width: int | None = None) -> None:
+        if screen_width is None:
+            screen = QGuiApplication.primaryScreen()
+            screen_width = screen.availableGeometry().width() if screen is not None else HUD_IDEAL_MIN_WIDTH
+        max_min = max(HUD_COMPACT_MIN_WIDTH, screen_width - SCREEN_MARGIN * 2)
+        hud_min = min(HUD_IDEAL_MIN_WIDTH, max_min)
+        caption_min = min(CAPTION_IDEAL_MIN_WIDTH, max(CAPTION_COMPACT_MIN_WIDTH, hud_min - 140))
+        self.setMinimumWidth(hud_min)
+        for edit in (getattr(self, "output_edit", None), getattr(self, "input_edit", None)):
+            if edit is not None:
+                edit.setMinimumWidth(caption_min)
 
     def save_geometry(self) -> str:
         """Return the current window geometry as a base64-encoded string."""

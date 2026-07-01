@@ -27,20 +27,28 @@ from hud_window import HUDWindow
 from i18n import tr
 from settings import AppSettings
 from settings_window import DIALOG_QSS, SettingsDialog
-from theme import ACCENT
+from theme import (
+    ACCENT,
+    RADIUS_INPUT,
+    SETTINGS_BG,
+    SETTINGS_CARD_BG,
+    SETTINGS_CARD_BORDER,
+    SETTINGS_INPUT_BORDER,
+    SETTINGS_TEXT_PRIMARY,
+)
 
 # Global QSS supplement: extends DIALOG_QSS with menu + QMessageBox styling so
 # the system tray context menu and warning/error dialogs share the same theme.
 GLOBAL_QSS = DIALOG_QSS + f"""
 QMenu {{
-    background: white;
-    border: 1px solid #D2D6DF;
-    border-radius: 8px;
+    background: {SETTINGS_CARD_BG};
+    border: 1px solid {SETTINGS_INPUT_BORDER};
+    border-radius: {RADIUS_INPUT}px;
     padding: 6px;
 }}
 QMenu::item {{
     background: transparent;
-    color: #1F2330;
+    color: {SETTINGS_TEXT_PRIMARY};
     padding: 6px 18px;
     border-radius: 5px;
     margin: 1px 4px;
@@ -51,21 +59,21 @@ QMenu::item:selected {{
 }}
 QMenu::separator {{
     height: 1px;
-    background: #E3E6EC;
+    background: {SETTINGS_CARD_BORDER};
     margin: 4px 8px;
 }}
 QToolTip {{
-    background: #1F2330;
+    background: {SETTINGS_TEXT_PRIMARY};
     color: white;
-    border: 1px solid #1F2330;
+    border: 1px solid {SETTINGS_TEXT_PRIMARY};
     padding: 4px 8px;
     border-radius: 4px;
 }}
 QMessageBox {{
-    background: #F4F5F8;
+    background: {SETTINGS_BG};
 }}
 QMessageBox QLabel {{
-    color: #1F2330;
+    color: {SETTINGS_TEXT_PRIMARY};
     font-size: 13px;
 }}
 """
