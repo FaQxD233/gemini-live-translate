@@ -6,8 +6,8 @@
 
 - **音源**：系统音频（WASAPI loopback）或麦克风
 - **实时翻译**：调用 Gemini Live API，边说边翻
-- **浮动 HUD**：透明置顶字幕条，鼠标拖动 / 四角缩放 / hover 显示控制栏
-- **目标语言**：16 种语言可选（中文、英文、西班牙语、日语等）
+- **浮动 HUD**：透明置顶字幕条，鼠标拖动 / 四角缩放 / hover 显示控制栏，并会在多屏变化后自动回到可见区域
+- **目标语言**：17 种语言可选（中文、英文、西班牙语、日语等）
 - **TTS 回放**：可选把翻译结果用目标语言念出来
 - **API 代理**：支持自定义 API Base URL（用于走代理或自建中转）
 - **配置持久化**：API key 等设置保存在 `%APPDATA%\gemini-live-translate\`
@@ -48,7 +48,7 @@ python main.py
 1. 创建 / 复用 `.venv`
 2. 安装运行时依赖 + PyInstaller
 3. 调用 PyInstaller 打包为单 exe 文件
-4. 输出 `dist\gemini-live-translate.exe`
+4. 输出 `dist\gemini-live-translate.exe`（默认禁用 UPX，减少部分杀软误报和原生依赖兼容风险）
 
 打包完成后，把 `dist\gemini-live-translate.exe` 拷贝到任何 Windows 机器双击运行即可，不需要安装 Python。
 
@@ -62,7 +62,7 @@ python main.py
 4. 选择目标语言（默认中文）
 5. 选择音源（默认系统音频）
 6. Save
-7. **右键托盘 → Start**
+7. **右键托盘 → Start / Stop**
 
 ## 配置文件位置
 
@@ -106,7 +106,7 @@ gemini-live-translate/
 - **WASAPI loopback 静音时不发数据**：选 "system audio" 时如果系统没在播放任何声音，HUD 字幕可能不动。这是 Windows API 的正常行为，开始播放音频后会自动恢复。
 - **首次启动 API key 为空**：会话无法启动，需先在 Settings 填入。
 - **修改 API key / 语言 / 音源 / echo 后**：会自动重启会话以应用新配置。
-- **Windows Defender 误报**：PyInstaller onefile 模式偶发被误报，可加白名单。
+- **Windows Defender 误报**：PyInstaller onefile 模式偶发被误报；当前构建默认禁用 UPX，如仍误报可加白名单。
 
 ## 故障排查
 

@@ -59,7 +59,7 @@ if exist gemini-live-translate.spec del gemini-live-translate.spec
 REM ---- Build ----
 echo.
 echo Building gemini-live-translate.exe (this may take 1-2 minutes)...
-pyinstaller --noconsole --onefile --name gemini-live-translate ^
+pyinstaller --noconsole --onefile --noupx --name gemini-live-translate ^
   --collect-all PySide6 ^
   --collect-all pyaudiowpatch ^
   --collect-all numpy ^
